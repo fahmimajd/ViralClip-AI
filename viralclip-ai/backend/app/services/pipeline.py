@@ -51,7 +51,14 @@ class ProcessingPipeline:
         """Update job progress"""
         logger.info(f"Job {job_id}: {progress}% - {message}")
         if job_id in self.progress_callbacks:
-            asyncio.create_task(self.progress_callbacks[job_id](progress, message))
+            try:
+                asyncio.create_task(self.progress_callbacks[job_id](progress, message))
+            except RuntimeError:
+                # No event loop running, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.progress_callbacks[job_id](progress, message))
+                loop.close()
     
     async def process_youtube_video(
         self,
