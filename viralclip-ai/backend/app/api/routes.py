@@ -1,11 +1,13 @@
 """
 FastAPI Routes for ViralClip AI
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from typing import List, Optional, Dict, Any
 import uuid
 import asyncio
+import shutil
+import json
 from pathlib import Path
 from loguru import logger
 from datetime import datetime
@@ -18,7 +20,8 @@ from app.models.schemas import (
     JobStatus,
     SearchRequest,
     SearchResult,
-    HealthResponse
+    HealthResponse,
+    GeneratedClip,
 )
 from app.services.pipeline import get_processing_pipeline
 from app.services.clip_selection import get_selection_service
@@ -30,7 +33,7 @@ jobs_db: Dict[str, Dict[str, Any]] = {}
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check() -> HealthResponse:
     """Health check endpoint"""
     return {
         "status": "healthy",
@@ -44,10 +47,7 @@ async def health_check():
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_video(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None
-):
+async def upload_video(file: UploadFile = File(...), background_tasks: BackgroundTasks = None) -> UploadResponse:
     """
     Upload a video file for processing
     

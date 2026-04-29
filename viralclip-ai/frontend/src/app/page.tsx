@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import apiService, { Job } from '@/lib/api';
 import FileUpload from '@/components/FileUpload';
 import JobCard from '@/components/JobCard';
@@ -14,12 +14,12 @@ export default function HomePage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Load jobs on mount
-  useState(() => {
+  useEffect(() => {
     loadJobs();
     // Poll for job updates every 5 seconds
     const interval = setInterval(loadJobs, 5000);
     return () => clearInterval(interval);
-  });
+  }, []);
 
   const loadJobs = async () => {
     try {

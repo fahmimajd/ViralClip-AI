@@ -1,42 +1,43 @@
 ```
 # Dependencies
-node_modules/
 .venv/
 venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+node_modules/
 
 # Build artifacts
 dist/
 build/
-target/
-*.egg-info/
+*.pyc
+*.pyo
+*.pyd
 
-# Environment variables
+# Environment
 .env
 .env.local
 .env.*
 
-# Logs
-*.log
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# IDE files
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS files
+# Logs
+*.log
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Docker
-.dockerenv
+# Python specific
+*.py[cod]
+*$py.class
+*.so
+.Python
 ```
