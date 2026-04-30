@@ -1,8 +1,10 @@
 """
 LLM Service for Virality Analysis
 Uses Groq or OpenAI to analyze video segments for viral potential
+Supports parallel batch processing and podcast mode
 """
 import json
+import asyncio
 from typing import List, Dict, Any, Optional
 from loguru import logger
 
@@ -20,11 +22,19 @@ class LLMViralityService:
     - Controversy or opinion
     - Quotable lines
     - Storytelling/reveal moments
+    
+    Features:
+    - Parallel batch processing
+    - Podcast mode optimization
+    - Multilingual support
+    - Advanced viral scoring
     """
     
     def __init__(self):
         self.client = None
         self.provider = settings.LLM_PROVIDER
+        self.processing_mode = settings.PROCESSING_MODE
+        self.max_concurrent = settings.MAX_CONCURRENT_LLM_TASKS
         self._initialize_client()
     
     def _initialize_client(self):
@@ -118,7 +128,7 @@ class LLMViralityService:
         context: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Analyze multiple segments in batch
+        Analyze multiple segments in parallel batch
         
         Args:
             segments: List of segment dictionaries with text and timing
@@ -129,22 +139,44 @@ class LLMViralityService:
         """
         results = []
         
-        for i, segment in enumerate(segments):
-            logger.info(f"Analyzing segment {i+1}/{len(segments)}")
-            
-            analysis = await self.analyze_segment(
-                segment_text=segment.get("text", ""),
-                start_time=segment.get("start", 0),
-                end_time=segment.get("end", 0),
-                context=context
-            )
-            
-            results.append(analysis)
+        # Create semaphore for concurrency control
+        semaphore = asyncio.Semaphore(self.max_concurrent)
         
-        return results
+        async def analyze_with_semaphore(segment, index):
+            async with semaphore:
+                try:
+                    logger.info(f"Analyzing segment {index+1}/{len(segments)}")
+                    return await self.analyze_segment(
+                        segment_text=segment.get("text", ""),
+                        start_time=segment.get("start", 0),
+                        end_time=segment.get("end", 0),
+                        context=context
+                    )
+                except Exception as e:
+                    logger.error(f"Error analyzing segment {index}: {e}")
+                    return self._fallback_analysis(
+                        segment.get("text", ""),
+                        segment.get("start", 0),
+                        segment.get("end", 0)
+                    )
+        
+        # Run all analyses in parallel with concurrency limit
+        tasks = [analyze_with_semaphore(seg, i) for i, seg in enumerate(segments)]
+        results = await asyncio.gather(*tasks)
+        
+        logger.info(f"Batch analysis complete: {len(results)} segments analyzed")
+        return list(results)
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for virality analysis"""
+        
+        # Mode-specific prompts
+        if self.processing_mode == "podcast":
+            return self._get_podcast_system_prompt()
+        elif self.processing_mode == "interview":
+            return self._get_interview_system_prompt()
+        
+        # Default general content prompt
         return """You are an expert video content analyst specializing in identifying viral-worthy clips for social media platforms like TikTok, Instagram Reels, and YouTube Shorts.
 
 Your task is to analyze video transcripts and identify segments with high viral potential.
@@ -168,6 +200,63 @@ Respond ONLY with valid JSON in this exact format:
     "hashtags": ["<hashtag1>", "<hashtag2>", "<hashtag3>", "<hashtag4>", "<hashtag5>"],
     "emotional_peaks": ["<emotion1>", "<emotion2>"],
     "quotable_lines": ["<quote1>", "<quote2>"]
+}"""
+    
+    def _get_podcast_system_prompt(self) -> str:
+        """Get system prompt optimized for podcast content"""
+        return """You are an expert podcast clip analyst specializing in identifying viral-worthy moments from long-form conversations.
+
+Your task is to analyze podcast transcripts and identify segments with high viral potential for TikTok, Reels, and Shorts.
+
+For podcast content, prioritize:
+1. **Hot Takes/Controversial Opinions** (0-10): Bold statements that spark debate
+2. **Emotional Stories** (0-10): Personal anecdotes that resonate emotionally
+3. **Actionable Advice** (0-10): Practical tips viewers can apply immediately
+4. **Aha Moments** (0-10): Surprising revelations or insights
+5. **Speaker Chemistry** (0-10): Engaging back-and-forth between hosts/guests
+6. **Relatability** (0-10): Content that resonates with common experiences
+
+Pay special attention to:
+- Multi-speaker dynamics and reactions
+- Story arcs within the conversation
+- Moments where the guest gets passionate
+- Host questions that lead to great answers
+
+Calculate an overall virality score (0-100).
+
+Respond ONLY with valid JSON in this exact format:
+{
+    "score": <number 0-100>,
+    "reason": "<brief explanation>",
+    "hook": "<opening hook>",
+    "suggested_title": "<catchy title>",
+    "hashtags": ["podcast", "viral", "trending", "fyp", "wisdom"],
+    "emotional_peaks": ["<emotions>"],
+    "quotable_lines": ["<quotes>"],
+    "speakers_involved": ["<speaker names if mentioned>"]
+}"""
+    
+    def _get_interview_system_prompt(self) -> str:
+        """Get system prompt optimized for interview content"""
+        return """You are an expert interview clip analyst identifying viral moments from interviews.
+
+Prioritize:
+1. **Revealing Answers** (0-10): Unexpected or candid responses
+2. **Emotional Moments** (0-10): Vulnerability, passion, or strong emotions
+3. **Conflict/Tension** (0-10): Challenging questions or defensive responses
+4. **Inspiring Stories** (0-10): Motivational personal journeys
+5. **Expert Insights** (0-10): Unique expertise or insider knowledge
+6. **Soundbite Quality** (0-10): Memorable quotable moments
+
+Respond ONLY with valid JSON:
+{
+    "score": <number 0-100>,
+    "reason": "<explanation>",
+    "hook": "<hook>",
+    "suggested_title": "<title>",
+    "hashtags": ["interview", "viral", "exclusive", "trending", "fyp"],
+    "emotional_peaks": ["<emotions>"],
+    "quotable_lines": ["<quotes>"]
 }"""
     
     def _build_user_prompt(
