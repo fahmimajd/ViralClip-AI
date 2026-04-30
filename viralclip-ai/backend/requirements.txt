@@ -42,6 +42,9 @@ groq==0.4.2
 openai==1.10.0
 httpx==0.26.0
 
+# Semantic Search & Embeddings (NEW)
+sentence-transformers==2.2.2
+
 # Utilities
 numpy==1.26.3
 scipy==1.12.0

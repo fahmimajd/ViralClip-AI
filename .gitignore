@@ -1,53 +1,38 @@
+```
 # Dependencies
-.venv/
 venv/
+.venv/
 __pycache__/
-node_modules/
-
-# Build artifacts
-dist/
-build/
-.next/
-out/
-tsconfig.tsbuildinfo
 *.pyc
 *.pyo
 *.pyd
+node_modules/
 
-# Environment
+# Build and distribution artifacts
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+
+# Environment files
 .env
 .env.local
-.env.*
-cookies.txt
+*.env.*
 
-# Editors
-.codex
-.codex/
+# Editors and IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+*.tmp
 
 # Logs
 *.log
 
-# Runtime artifacts
-viralclip-ai/backend/uploads/
-viralclip-ai/backend/outputs/
-viralclip-ai/backend/temp/
-viralclip-ai/backend/.cache/
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
-
-# Python specific
-*.py[cod]
-*$py.class
-*.so
-.Python
+```

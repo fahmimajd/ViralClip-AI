@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "groq"  # groq or openai
     LLM_MODEL: str = "llama3-70b-8192"  # Groq default
     
+    # Embedding Model for Semantic Search
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    
     # Whisper Models
     WHISPER_MODEL: str = "large-v3"
     WHISPER_DEVICE: str = "auto"  # auto, cuda, cpu
@@ -48,6 +51,10 @@ class Settings(BaseSettings):
     # Diarization
     PYANNOTE_TOKEN: Optional[str] = None
     YTDLP_COOKIES_FILE: Optional[str] = None
+    
+    # Processing Mode
+    PROCESSING_MODE: str = "general"  # general, podcast, interview, monologue
+    MAX_CONCURRENT_LLM_TASKS: int = 5  # For parallel LLM analysis
     
     # Video Processing
     VIDEO_CODEC: str = "libx264"

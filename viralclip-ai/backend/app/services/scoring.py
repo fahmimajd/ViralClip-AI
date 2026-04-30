@@ -1,6 +1,6 @@
 """
-Multi-Modal Scoring Service
-Combines LLM analysis with audio and visual features
+Advanced Multi-Modal Scoring Service
+Combines LLM analysis with audio, visual features and viral scoring
 """
 import numpy as np
 from typing import List, Dict, Any, Optional
@@ -15,16 +15,22 @@ class MultiModalScoringService:
     Service for multi-modal viral clip scoring
     
     Combines:
-    - LLM virality analysis (60%)
-    - Audio energy peaks (20%)
-    - Visual scene changes (20%)
+    - LLM virality analysis (50%)
+    - Audio energy peaks (15%)
+    - Visual scene changes (15%)
+    - Advanced viral components (20%):
+      * Hook strength
+      * Emotional diversity
+      * Call-to-action presence
+      * Question engagement potential
     """
     
     def __init__(self):
         self.weights = {
-            "llm": settings.LLM_WEIGHT,
-            "audio": settings.AUDIO_WEIGHT,
-            "visual": settings.VISUAL_WEIGHT
+            "llm": 0.50,
+            "audio": 0.15,
+            "visual": 0.15,
+            "viral_components": 0.20
         }
     
     def calculate_audio_score(
@@ -182,32 +188,105 @@ class MultiModalScoringService:
         self,
         llm_score: float,
         audio_score: float,
-        visual_score: float
+        visual_score: float,
+        llm_analysis: Optional[Dict[str, Any]] = None
     ) -> Dict[str, float]:
         """
-        Calculate weighted final score
+        Calculate weighted final score with advanced viral components
         
         Args:
             llm_score: LLM virality score (0-100)
             audio_score: Audio feature score (0-100)
             visual_score: Visual feature score (0-100)
+            llm_analysis: Full LLM analysis for viral component extraction
             
         Returns:
             Dictionary with individual and final scores
         """
+        # Calculate viral component score from LLM analysis
+        viral_component_score = self._calculate_viral_components(llm_analysis)
+        
         final_score = (
             llm_score * self.weights["llm"] +
             audio_score * self.weights["audio"] +
-            visual_score * self.weights["visual"]
+            visual_score * self.weights["visual"] +
+            viral_component_score * self.weights["viral_components"]
         )
         
         return {
             "llm_score": llm_score,
             "audio_score": audio_score,
             "visual_score": visual_score,
+            "viral_component_score": viral_component_score,
             "final_score": final_score,
             "weights": self.weights.copy()
         }
+    
+    def _calculate_viral_components(self, llm_analysis: Optional[Dict[str, Any]]) -> float:
+        """
+        Calculate advanced viral component score
+        
+        Components:
+        - Hook strength (first 3 seconds impact)
+        - Emotional diversity (multiple emotions = more engaging)
+        - Call-to-action presence
+        - Question engagement potential
+        - Controversy/debate potential
+        
+        Args:
+            llm_analysis: LLM analysis result
+            
+        Returns:
+            Viral component score (0-100)
+        """
+        if not llm_analysis:
+            return 50.0  # Neutral default
+        
+        score = 0.0
+        components = 0
+        
+        # 1. Hook Strength (from emotional peaks or quotable lines)
+        emotional_peaks = llm_analysis.get("emotional_peaks", [])
+        if len(emotional_peaks) >= 2:
+            score += 25  # Multiple emotions = strong hook potential
+            components += 1
+        elif len(emotional_peaks) == 1:
+            score += 15
+            components += 1
+        
+        # 2. Emotional Diversity
+        unique_emotions = set(emotional_peaks)
+        if len(unique_emotions) >= 3:
+            score += 25  # High emotional range
+        elif len(unique_emotions) >= 2:
+            score += 15
+        
+        # 3. Question Engagement (questions drive comments)
+        quotable_lines = llm_analysis.get("quotable_lines", [])
+        has_questions = any("?" in line for line in quotable_lines)
+        if has_questions:
+            score += 25  # Questions encourage engagement
+            components += 1
+        
+        # 4. Call-to-Action or Strong Opinion
+        reason = llm_analysis.get("reason", "").lower()
+        cta_keywords = ["should", "must", "need to", "try this", "don't forget", "subscribe", "follow"]
+        if any(keyword in reason for keyword in cta_keywords):
+            score += 25  # Has CTA
+            components += 1
+        
+        # 5. Controversy/Debate Potential (from hashtags or reason)
+        controversy_keywords = ["controversial", "debate", "unpopular", "hot take", "truth", "exposed"]
+        if any(keyword in reason for keyword in controversy_keywords):
+            score += 20  # Controversy drives engagement
+        
+        # Normalize to 0-100
+        if components > 0:
+            score = min(100, score)
+        else:
+            score = 50.0  # Default if no components detected
+        
+        return score
     
     async def score_segment(
         self,
@@ -226,7 +305,7 @@ class MultiModalScoringService:
             llm_analysis: Pre-computed LLM analysis (optional)
             
         Returns:
-            Complete scoring result
+            Complete scoring result with viral components
         """
         start = segment.get("start", 0)
         end = segment.get("end", 0)
@@ -240,12 +319,18 @@ class MultiModalScoringService:
         # Calculate visual score
         visual_score = self.calculate_visual_score(video_path, start, end)
         
-        # Calculate final score
-        scores = self.calculate_final_score(llm_score, audio_score, visual_score)
+        # Calculate final score with viral components
+        scores = self.calculate_final_score(
+            llm_score, 
+            audio_score, 
+            visual_score,
+            llm_analysis
+        )
         
         logger.info(
             f"Segment {start:.1f}-{end:.1f}s scored: "
             f"LLM={llm_score:.1f}, Audio={audio_score:.1f}, Visual={visual_score:.1f}, "
+            f"Viral={scores.get('viral_component_score', 0):.1f}, "
             f"Final={scores['final_score']:.1f}"
         )
         

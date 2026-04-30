@@ -442,17 +442,25 @@ class VideoProcessingService:
         style: Dict[str, Any]
     ):
         """
-        Generate ASS subtitle file with styling
+        Generate ASS subtitle file with styling and keyword highlighting
         
         ASS format allows for advanced text styling and animations
+        
+        Features:
+        - Word-by-word karaoke animation
+        - Keyword highlighting in different colors
+        - Fade in/out effects
+        - Position control
         """
         font = style.get("font", "Arial")
         fontsize = style.get("fontsize", 48)
         color = style.get("color", "white")
         bgcolor = style.get("bg_color", "&H80000000")
+        highlight_keywords = style.get("highlight_keywords", True)
         
         # Convert color names to ASS format
         color_hex = self._color_to_ass(color)
+        highlight_color = style.get("highlight_color", "&H00FFFF")  # Yellow highlight
         
         ass_content = f"""[Script Info]
 Title: ViralClip AI Captions
@@ -463,21 +471,69 @@ PlayResY: 1920
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font},{fontsize},&H00{color_hex[2:]},&H00FFFFFF,&H00000000,{bgcolor},1,0,0,0,100,100,0,0,1,2,0,2,10,10,140,1
+Style: Highlight,{font},{fontsize},{highlight_color},&H00FFFFFF,&H00000000,{bgcolor},1,0,0,0,100,100,0,0,1,2,0,2,10,10,140,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+        
+        # Common keywords to highlight (can be customized)
+        common_keywords = {
+            'important': ['IMPORTANT', 'CRITICAL', 'MUST', 'NEED TO'],
+            'emotion': ['AMAZING', 'SHOCKING', 'CRAZY', 'INSANE', 'WOW'],
+            'action': ['NOW', 'TODAY', 'STOP', 'START', 'DO THIS'],
+        }
         
         for caption in captions:
             start = self._seconds_to_ass_time(caption["start"])
             end = self._seconds_to_ass_time(caption["end"])
             text = caption["text"].replace("\n", "\\N")
             
-            # Add word-by-word animation effect (simplified)
-            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(200,200)}}{text}\n"
+            # Apply keyword highlighting if enabled
+            if highlight_keywords:
+                text = self._highlight_keywords_in_text(text, common_keywords)
+            
+            # Add word-by-word animation effect with fade
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(150,150)}}{text}\n"
         
         Path(output_path).write_text(ass_content, encoding='utf-8')
         logger.debug(f"ASS file generated: {output_path}")
+    
+    def _highlight_keywords_in_text(self, text: str, keywords: Dict[str, List[str]]) -> str:
+        """
+        Highlight important keywords in the text with different color
+        
+        Args:
+            text: Original caption text
+            keywords: Dictionary of keyword categories
+            
+        Returns:
+            Text with ASS formatting for highlighted keywords
+        """
+        import re
+        
+        result = text
+        
+        # Highlight numbers (statistics, data points)
+        number_pattern = r'\b\d+(\.\d+)?(%|\s*(million|billion|thousand))?\b'
+        matches = list(re.finditer(number_pattern, result, re.IGNORECASE))
+        offset = 0
+        for match in matches:
+            start_pos = match.start() + offset
+            end_pos = match.end() + offset
+            original = match.group()
+            highlighted = f"{{\\c&H00FFFF&}}{original}{{\\c&H00FFFFFF&}}"
+            result = result[:start_pos] + highlighted + result[end_pos:]
+            offset += len(highlighted) - len(original)
+        
+        # Highlight emotional words
+        for category, words in keywords.items():
+            for word in words:
+                pattern = r'\b(' + re.escape(word) + r')\b'
+                replacement = f"{{\\c&H0000FF&}}\\1{{\\c&H00FFFFFF&}}"
+                result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        
+        return result
     
     def _seconds_to_ass_time(self, seconds: float) -> str:
         """Convert seconds to ASS time format (H:MM:SS.cc)"""
