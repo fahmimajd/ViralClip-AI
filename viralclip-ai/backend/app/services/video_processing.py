@@ -5,6 +5,9 @@ Handles video downloading, cropping, captioning, and rendering
 import os
 import subprocess
 import json
+import shutil
+import html
+import urllib.request
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from datetime import timedelta
@@ -28,11 +31,24 @@ class VideoProcessingService:
         self.upload_dir = Path(settings.UPLOAD_DIR)
         self.output_dir = Path(settings.OUTPUT_DIR)
         self.temp_dir = Path(settings.TEMP_DIR)
+        self.ffmpeg_bin = self._resolve_ffmpeg()
+        self.ffprobe_bin = shutil.which("ffprobe")
         
         # Ensure directories exist
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def _resolve_ffmpeg(self) -> str:
+        """Prefer system FFmpeg, fallback to imageio-ffmpeg's bundled binary."""
+        if ffmpeg_bin := shutil.which("ffmpeg"):
+            return ffmpeg_bin
+
+        try:
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return "ffmpeg"
     
     def download_youtube_video(
         self, 
@@ -56,13 +72,33 @@ class VideoProcessingService:
             output_path = str(self.upload_dir / f"{video_id}.mp4")
         
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/best',
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
+            'ffmpeg_location': str(Path(self.ffmpeg_bin).parent),
             'progress_hooks': [self._download_progress_hook],
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,
+            'retries': 10,
+            'fragment_retries': 10,
+            'extractor_retries': 3,
+            'js_runtimes': {
+                'node': {'path': '/usr/bin/node'},
+            },
+            'http_headers': {
+                'User-Agent': (
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/124.0.0.0 Safari/537.36'
+                ),
+                'Accept-Language': 'en-US,en;q=0.9',
+            },
         }
+
+        cookies_file = settings.YTDLP_COOKIES_FILE
+        if cookies_file:
+            ydl_opts['cookiefile'] = cookies_file
         
         logger.info(f"Downloading YouTube video: {url}")
         
@@ -84,7 +120,8 @@ class VideoProcessingService:
                     "duration": info.get('duration', 0),
                     "resolution": f"{info.get('width', 0)}x{info.get('height', 0)}",
                     "thumbnail": info.get('thumbnail', ''),
-                    "author": info.get('uploader', 'Unknown')
+                    "author": info.get('uploader', 'Unknown'),
+                    "transcript": self.get_youtube_transcript(info),
                 }
                 
                 logger.info(f"Downloaded: {result['title']} ({result['duration']}s)")
@@ -97,6 +134,145 @@ class VideoProcessingService:
                 "error": str(e),
                 "file_path": None
             }
+
+    def get_youtube_transcript(self, info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract YouTube subtitles/auto-captions from yt-dlp metadata when available."""
+        preferred_langs = [
+            lang.strip()
+            for lang in settings.YOUTUBE_TRANSCRIPT_LANGS.split(",")
+            if lang.strip()
+        ]
+        subtitle_sources = [
+            ("manual", info.get("subtitles") or {}),
+            ("automatic", info.get("automatic_captions") or {}),
+        ]
+
+        for source_name, subtitles in subtitle_sources:
+            for lang in preferred_langs:
+                caption_formats = subtitles.get(lang) or subtitles.get(f"{lang}-orig")
+                if not caption_formats:
+                    continue
+
+                caption = self._select_caption_format(caption_formats)
+                if not caption:
+                    continue
+
+                transcript = self._download_caption_transcript(caption, lang, source_name)
+                if transcript and transcript["segments"]:
+                    logger.info(
+                        f"Using YouTube {source_name} transcript: "
+                        f"{lang} ({len(transcript['segments'])} segments)"
+                    )
+                    return transcript
+
+        return None
+
+    def _select_caption_format(self, caption_formats: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Prefer YouTube json3 captions because they preserve timing cleanly."""
+        for ext in ("json3", "srv3", "vtt"):
+            for caption in caption_formats:
+                if caption.get("ext") == ext and caption.get("url"):
+                    return caption
+        return next((caption for caption in caption_formats if caption.get("url")), None)
+
+    def _download_caption_transcript(
+        self,
+        caption: Dict[str, Any],
+        language: str,
+        source: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            request = urllib.request.Request(
+                caption["url"],
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                content = response.read().decode("utf-8", errors="replace")
+
+            if caption.get("ext") == "json3":
+                data = json.loads(content)
+                segments = self._parse_json3_captions(data)
+            else:
+                segments = self._parse_vtt_captions(content)
+
+            if not segments:
+                return None
+
+            return {
+                "segments": segments,
+                "language": language,
+                "duration": max(segment["end"] for segment in segments),
+                "source": f"youtube_{source}",
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load YouTube transcript: {e}")
+            return None
+
+    def _parse_json3_captions(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        segments = []
+        for event in data.get("events", []):
+            if "segs" not in event:
+                continue
+
+            text = "".join(seg.get("utf8", "") for seg in event.get("segs", []))
+            text = html.unescape(" ".join(text.split()))
+            if not text:
+                continue
+
+            start = event.get("tStartMs", 0) / 1000
+            duration = event.get("dDurationMs", 0) / 1000
+            if duration <= 0:
+                duration = 2.0
+
+            segments.append({
+                "start": start,
+                "end": start + duration,
+                "text": text,
+                "speaker": None,
+                "confidence": 1.0,
+            })
+
+        return segments
+
+    def _parse_vtt_captions(self, content: str) -> List[Dict[str, Any]]:
+        segments = []
+        blocks = content.replace("\r\n", "\n").split("\n\n")
+        for block in blocks:
+            lines = [line.strip() for line in block.split("\n") if line.strip()]
+            timing_line = next((line for line in lines if "-->" in line), None)
+            if not timing_line:
+                continue
+
+            start_raw, end_raw = [part.strip().split(" ")[0] for part in timing_line.split("-->", 1)]
+            text_lines = lines[lines.index(timing_line) + 1:]
+            text = html.unescape(" ".join(" ".join(text_lines).split()))
+            if not text:
+                continue
+
+            segments.append({
+                "start": self._vtt_time_to_seconds(start_raw),
+                "end": self._vtt_time_to_seconds(end_raw),
+                "text": text,
+                "speaker": None,
+                "confidence": 1.0,
+            })
+
+        return segments
+
+    def _vtt_time_to_seconds(self, value: str) -> float:
+        value = value.replace(",", ".")
+        parts = value.split(":")
+        seconds = float(parts[-1])
+        minutes = int(parts[-2]) if len(parts) >= 2 else 0
+        hours = int(parts[-3]) if len(parts) >= 3 else 0
+        return hours * 3600 + minutes * 60 + seconds
     
     def _download_progress_hook(self, d: Dict):
         """Progress hook for yt-dlp"""
@@ -122,7 +298,7 @@ class VideoProcessingService:
             output_path = str(self.temp_dir / f"{Path(video_path).stem}.wav")
         
         cmd = [
-            'ffmpeg', '-i', video_path,
+            self.ffmpeg_bin, '-i', video_path,
             '-vn',  # No video
             '-acodec', 'pcm_s16le',  # PCM audio
             '-ar', '16000',  # 16kHz sample rate
@@ -179,7 +355,7 @@ class VideoProcessingService:
             crop_filter = f"scale={width}:{height},crop={width}:{height}"
         
         cmd = [
-            'ffmpeg',
+            self.ffmpeg_bin,
             '-i', input_path,
             '-ss', str(start_time),
             '-t', str(duration),
@@ -238,7 +414,7 @@ class VideoProcessingService:
         
         # FFmpeg command with subtitle overlay
         cmd = [
-            'ffmpeg',
+            self.ffmpeg_bin,
             '-i', input_path,
             '-vf', f"ass={ass_path}",
             '-c:v', settings.VIDEO_CODEC,
@@ -342,18 +518,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """
         if timestamp is None:
             # Get video duration
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1:nokey=1',
-                video_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            duration = float(result.stdout.strip())
-            timestamp = duration / 3  # Take frame at 1/3 point
+            if self.ffprobe_bin:
+                cmd = [
+                    self.ffprobe_bin, '-v', 'error',
+                    '-show_entries', 'format=duration',
+                    '-of', 'default=noprint_wrappers=1:nokey=1',
+                    video_path
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                duration = float(result.stdout.strip())
+                timestamp = duration / 3  # Take frame at 1/3 point
+            else:
+                timestamp = 1.0
         
         cmd = [
-            'ffmpeg',
+            self.ffmpeg_bin,
             '-i', video_path,
             '-ss', str(timestamp),
             '-vframes', '1',
@@ -372,8 +551,30 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def get_video_info(self, video_path: str) -> Dict[str, Any]:
         """Get video metadata using ffprobe"""
+        if not self.ffprobe_bin:
+            try:
+                import cv2
+                capture = cv2.VideoCapture(video_path)
+                fps = capture.get(cv2.CAP_PROP_FPS) or 0
+                frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+                width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+                capture.release()
+
+                return {
+                    "duration": frame_count / fps if fps else 0,
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                    "has_audio": True,
+                    "file_size": Path(video_path).stat().st_size
+                }
+            except Exception as e:
+                logger.error(f"Video info error: {e}")
+                return {}
+
         cmd = [
-            'ffprobe', '-v', 'quiet',
+            self.ffprobe_bin, '-v', 'quiet',
             '-print_format', 'json',
             '-show_format', '-show_streams',
             video_path

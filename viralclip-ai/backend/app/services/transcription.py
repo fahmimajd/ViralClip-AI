@@ -35,7 +35,9 @@ class TranscriptionService:
             self.whisper_model = WhisperModel(
                 settings.WHISPER_MODEL,
                 device=settings.WHISPER_DEVICE,
-                compute_type=settings.WHISPER_COMPUTE_TYPE
+                compute_type=settings.WHISPER_COMPUTE_TYPE,
+                cpu_threads=settings.WHISPER_CPU_THREADS,
+                num_workers=settings.WHISPER_NUM_WORKERS
             )
             logger.info("Whisper model loaded successfully")
             

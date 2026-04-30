@@ -10,7 +10,7 @@ import shutil
 import json
 from pathlib import Path
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.models.schemas import (
@@ -30,6 +30,11 @@ router = APIRouter(prefix=settings.API_PREFIX, tags=["main"])
 
 # In-memory job storage (use database in production)
 jobs_db: Dict[str, Dict[str, Any]] = {}
+
+
+def utc_now() -> datetime:
+    """Return timezone-aware UTC timestamps for API responses."""
+    return datetime.now(timezone.utc)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -84,8 +89,8 @@ async def upload_video(file: UploadFile = File(...), background_tasks: Backgroun
             "file_path": str(file_path),
             "filename": file.filename,
             "file_size": len(content),
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": utc_now(),
+            "updated_at": utc_now(),
             "clips": [],
             "error": None
         }
@@ -133,8 +138,8 @@ async def process_youtube(
                 "add_music": request.add_music,
                 "search_query": request.search_query
             },
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": utc_now(),
+            "updated_at": utc_now(),
             "clips": [],
             "error": None
         }
@@ -143,7 +148,7 @@ async def process_youtube(
         async def progress_callback(progress: int, message: str):
             if job_id in jobs_db:
                 jobs_db[job_id]["progress"] = progress
-                jobs_db[job_id]["updated_at"] = datetime.utcnow()
+                jobs_db[job_id]["updated_at"] = utc_now()
                 
                 # Update status based on progress
                 if progress == 0:
@@ -158,7 +163,7 @@ async def process_youtube(
                     jobs_db[job_id]["status"] = JobStatus.RENDERING
                 else:
                     jobs_db[job_id]["status"] = JobStatus.COMPLETED
-                    jobs_db[job_id]["completed_at"] = datetime.utcnow()
+                    jobs_db[job_id]["completed_at"] = utc_now()
         
         async def process_task():
             pipeline = get_processing_pipeline()
@@ -176,7 +181,7 @@ async def process_youtube(
                     jobs_db[job_id]["clips"] = result["clips"]
                     jobs_db[job_id]["metadata"] = result["metadata"]
                     jobs_db[job_id]["status"] = JobStatus.COMPLETED
-                    jobs_db[job_id]["completed_at"] = datetime.utcnow()
+                    jobs_db[job_id]["completed_at"] = utc_now()
                 else:
                     jobs_db[job_id]["error"] = result["error"]
                     jobs_db[job_id]["status"] = JobStatus.FAILED
@@ -224,13 +229,13 @@ async def process_upload(
             "top_clips": top_clips,
             "add_captions": add_captions
         }
-        job["updated_at"] = datetime.utcnow()
+        job["updated_at"] = utc_now()
         
         # Start processing
         async def progress_callback(progress: int, message: str):
             if job_id in jobs_db:
                 jobs_db[job_id]["progress"] = progress
-                jobs_db[job_id]["updated_at"] = datetime.utcnow()
+                jobs_db[job_id]["updated_at"] = utc_now()
                 
                 if progress == 0:
                     jobs_db[job_id]["status"] = JobStatus.FAILED
@@ -242,7 +247,7 @@ async def process_upload(
                     jobs_db[job_id]["status"] = JobStatus.RENDERING
                 else:
                     jobs_db[job_id]["status"] = JobStatus.COMPLETED
-                    jobs_db[job_id]["completed_at"] = datetime.utcnow()
+                    jobs_db[job_id]["completed_at"] = utc_now()
         
         async def process_task():
             pipeline = get_processing_pipeline()
@@ -259,7 +264,7 @@ async def process_upload(
                     jobs_db[job_id]["clips"] = result["clips"]
                     jobs_db[job_id]["metadata"] = result["metadata"]
                     jobs_db[job_id]["status"] = JobStatus.COMPLETED
-                    jobs_db[job_id]["completed_at"] = datetime.utcnow()
+                    jobs_db[job_id]["completed_at"] = utc_now()
                 else:
                     jobs_db[job_id]["error"] = result["error"]
                     jobs_db[job_id]["status"] = JobStatus.FAILED

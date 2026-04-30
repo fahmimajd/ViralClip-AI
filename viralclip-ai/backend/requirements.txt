@@ -1,4 +1,6 @@
 # Backend dependencies for ViralClip AI
+setuptools==80.9.0
+
 # Core FastAPI
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
@@ -16,18 +18,19 @@ celery==5.3.6
 redis==5.0.1
 
 # Video Processing
-yt-dlp==2024.1.21
+yt-dlp==2026.3.17
+yt-dlp-ejs==0.8.0
 moviepy==1.0.3
 opencv-python==4.9.0.80
-pyscenedetect==0.6.3
+scenedetect==0.6.3
 
 # Audio Processing
 librosa==0.10.1
 soundfile==0.12.1
 
 # Speech-to-Text
-faster-whisper==0.10.0
-ctranslate2==4.0.0
+faster-whisper==1.2.1
+ctranslate2==4.7.1
 
 # Speaker Diarization
 pyannote.audio==3.1.1

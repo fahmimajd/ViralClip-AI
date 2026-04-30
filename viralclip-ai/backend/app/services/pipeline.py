@@ -108,9 +108,13 @@ class ProcessingPipeline:
             self._update_progress(job_id, 15, "Extracting audio...")
             audio_path = self.video.extract_audio(video_path)
             
-            # Step 3: Transcribe with diarization
-            self._update_progress(job_id, 25, "Transcribing audio...")
-            transcript = await self.transcription.transcribe(audio_path)
+            # Step 3: Prefer YouTube transcript/captions, fallback to local Whisper.
+            transcript = download_result.get("transcript")
+            if transcript and transcript.get("segments"):
+                self._update_progress(job_id, 25, "Using YouTube transcript...")
+            else:
+                self._update_progress(job_id, 25, "Transcribing audio...")
+                transcript = await self.transcription.transcribe(audio_path)
             
             # Save transcript
             transcript_path = str(Path(settings.OUTPUT_DIR) / f"{job_id}_transcript.json")

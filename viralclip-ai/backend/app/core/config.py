@@ -41,9 +41,13 @@ class Settings(BaseSettings):
     WHISPER_MODEL: str = "large-v3"
     WHISPER_DEVICE: str = "auto"  # auto, cuda, cpu
     WHISPER_COMPUTE_TYPE: str = "float16"  # float16, int8, int8_float16
+    WHISPER_CPU_THREADS: int = 12
+    WHISPER_NUM_WORKERS: int = 1
+    YOUTUBE_TRANSCRIPT_LANGS: str = "id,en"
     
     # Diarization
     PYANNOTE_TOKEN: Optional[str] = None
+    YTDLP_COOKIES_FILE: Optional[str] = None
     
     # Video Processing
     VIDEO_CODEC: str = "libx264"
